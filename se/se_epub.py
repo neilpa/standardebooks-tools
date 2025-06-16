@@ -6,7 +6,7 @@ Standard Ebooks epub3 files.
 
 import base64
 from copy import deepcopy
-import datetime
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import importlib.resources
@@ -32,7 +32,7 @@ class GitCommit:
 	short_sha = ""
 	timestamp = None
 
-	def __init__(self, short_sha: str, timestamp: datetime.datetime):
+	def __init__(self, short_sha: str, timestamp: datetime):
 		self.short_sha = short_sha
 		self.timestamp = timestamp
 
@@ -216,7 +216,7 @@ class SeEpub:
 				git_command = git.cmd.Git(self.path)
 				output = git_command.show("-s", "--format=%h %ct", "HEAD").split()
 
-				self._last_commit = GitCommit(output[0], datetime.datetime.fromtimestamp(int(output[1]), datetime.timezone.utc))
+				self._last_commit = GitCommit(output[0], datetime.fromtimestamp(int(output[1]), timezone.utc))
 			except Exception:
 				self._last_commit = None
 
@@ -390,6 +390,13 @@ class SeEpub:
 
 		return self._spine_file_paths
 
+	def write_metadata_file(self) -> None:
+		"""
+		Write the metadata file to disk.
+		"""
+		with open(self.metadata_file_path, "w", encoding="utf-8") as file:
+			file.write(self.metadata_dom.to_string())
+
 	def get_file(self, file_path: Path) -> str:
 		"""
 		Get raw file contents of a file in the epub.
@@ -473,13 +480,14 @@ class SeEpub:
 
 		return self._dom_cache[file_path_str]
 
-	def _recompose_xhtml(self, section: se.easy_xml.EasyXmlElement, output_dom: se.easy_xml.EasyXmlTree) -> None:
+	def _recompose_xhtml(self, section: se.easy_xml.EasyXmlElement, output_dom: se.easy_xml.EasyXmlTree, use_image_files: bool = False) -> None:
 		"""
 		Helper function used in self.recompose()
 
 		INPUTS
 		section: An EasyXmlElement to inspect
 		output_dom: A EasyXmlTree representing the entire output dom
+		use_image_files: if True, leave image src attributes as relative URLs instead of inlining as data: URIs
 
 		OUTPUTS
 		None
@@ -502,18 +510,21 @@ class SeEpub:
 		else:
 			output_dom.xpath("/html/body")[0].append(section)
 
-		# Convert all <img> references to inline base64
+		# Convert all <img> references to inline base64, unless use_image_files is True
 		# We even convert SVGs instead of inlining them, because CSS won't allow us to style inlined SVGs
 		# (for example if we want to apply max-width or filter: invert())
-		for img in section.xpath("//img[starts-with(@src, '../images/')]"):
-			img.set_attr("src", se.images.get_data_url(self.content_path / img.get_attr("src").replace("../", "")))
+		if not use_image_files:
+			for img in section.xpath("//img[starts-with(@src, '../images/')]"):
+				img.set_attr("src", se.images.get_data_url(self.content_path / img.get_attr("src").replace("../", "")))
 
-	def recompose(self, output_xhtml5: bool, extra_css_file: Union[Path,None] = None) -> str:
+	def recompose(self, output_xhtml5: bool, extra_css_file: Union[Path,None] = None, use_image_files: bool = False) -> str:
 		"""
 		Iterate over the XHTML files in this epub and "recompose" them into a single XHTML string representing this ebook.
 
 		INPUTS
 		output_xhtml5: true to output XHTML5 instead of HTML5
+		extra_css_file: path to an additional CSS file to include
+		use_image_files: if True, leave image src attributes as relative URLs instead of inlining as data: URIs
 
 		OUTPUTS
 		A string of HTML5 representing the entire recomposed ebook.
@@ -557,18 +568,19 @@ class SeEpub:
 
 			file_css = regex.sub(r"\s*@(charset|namespace).+?;\s*", "\n", file_css).strip()
 
-			# Convert background-image URLs to base64
-			for image in regex.finditer(pattern=r"""url\("(.+?\.(?:svg|png|jpg))"\)""", string=file_css):
-				url = image.captures(1)[0].replace("../", "")
-				url = regex.sub(r"^/", "", url)
-				try:
-					data_url = se.images.get_data_url(self.content_path / url)
-					file_css = file_css.replace(image.group(0), f"""url("{data_url}")""")
-				except FileNotFoundError:
-					# If the file isn't found, continue silently.
-					# File may not be found for example in web.css, which points to an image on the web
-					# server, not in the ebook.
-					pass
+			# Convert background-image URLs to base64, unless use_image_files is True
+			if not use_image_files:
+				for image in regex.finditer(pattern=r"""url\("(.+?\.(?:svg|png|jpg))"\)""", string=file_css):
+					url = image.captures(1)[0].replace("../", "")
+					url = regex.sub(r"^/", "", url)
+					try:
+						data_url = se.images.get_data_url(self.content_path / url)
+						file_css = file_css.replace(image.group(0), f"""url("{data_url}")""")
+					except FileNotFoundError:
+						# If the file isn't found, continue silently.
+						# File may not be found for example in web.css, which points to an image on the web
+						# server, not in the ebook.
+						pass
 
 			css = css + f"\n\n\n/* {filepath.name} */\n" + file_css
 
@@ -617,7 +629,7 @@ class SeEpub:
 			# Now, recompose the children
 			for node in dom.xpath("/html/body/*"):
 				try:
-					self._recompose_xhtml(node, output_dom)
+					self._recompose_xhtml(node, output_dom, use_image_files)
 				except se.SeException as ex:
 					raise se.SeException(f"[path][link=file://{file_path}]{file_path}[/][/]: {ex}") from ex
 
@@ -776,29 +788,37 @@ class SeEpub:
 
 		INPUTS:
 		target_endnote_number: The endnote to start shifting at
-		step: 1 to increment or -1 to decrement
+		step: X to increment or -X to decrement
 
 		OUTPUTS:
 		None.
 		"""
 
 		increment = step > 0
-		endnote_count = 0
 
 		if step == 0:
 			return
 
 		dom = self.get_dom(self.endnotes_path)
 
-		endnote_count = len(dom.xpath("//li[contains(@epub:type, 'endnote')]"))
-		if increment:
-			# Range is from COUNT -> target_endnote_number
-			note_range = range(endnote_count, target_endnote_number - 1, -1)
-		else:
-			# Range is from target_endnote_number -> COUNT
-			note_range = range(target_endnote_number, endnote_count + 1, 1)
+		# Get a list of all the integer endnote ids (we have books with non-integer endnote ids;
+		# this command won't work on them)
+		all_endnote_numbers = []
+		for node in dom.xpath("/html/body//li[contains(@epub:type, 'endnote')]"):
+			endnote_number = regex.sub("note-", "", node.get_attr("id"))
+			if endnote_number.isdigit():
+				all_endnote_numbers.append(int(endnote_number))
 
-		for endnote_number in note_range:
+		# The shift begins at target_endnote_number, so remove the endnote numbers before it
+		orig_endnote_numbers = [n for n in all_endnote_numbers if n >= target_endnote_number]
+
+		# If incrementing, start at the end and work backwards to keep from duplicating ids
+		if increment:
+			endnote_numbers = orig_endnote_numbers[::-1]
+		else:
+			endnote_numbers = orig_endnote_numbers
+
+		for endnote_number in endnote_numbers:
 			new_endnote_number = endnote_number + step
 
 			# Update all the actual endnotes in the endnotes file
@@ -817,12 +837,12 @@ class SeEpub:
 		except Exception as ex:
 			raise se.InvalidSeEbookException(f"Couldn’t open endnotes file: [path][link=file://{self.endnotes_path}]{self.endnotes_path}[/][/].") from ex
 
-		# Now update endnotes in all other files. We also do a pass over the endnotes file itself.
-		# again just in case there are endnotes within endnotes.
+		# Now update endnotes in all other files. We also do another pass over the endnotes file
+		# in case there are endnotes within endnotes.
 		for file_path in self.content_path.glob("**/*.xhtml"):
 			dom = self.get_dom(file_path)
 
-			for endnote_number in note_range:
+			for endnote_number in endnote_numbers:
 				new_endnote_number = endnote_number + step
 
 				# We don't use an xpath matching epub:type="noteref" because we can have hrefs that are not noterefs pointing to endnotes (like "see here")
@@ -844,30 +864,37 @@ class SeEpub:
 
 		INPUTS:
 		target_illustration_number: The illustration to start shifting at
-		step: 1 to increment or -1 to decrement
+		step: X to increment or -X to decrement
 
 		OUTPUTS:
 		None.
 		"""
 
 		increment = step > 0
-		illustration_count = 0
 
 		if step == 0:
 			return
 
 		dom = self.get_dom(self.loi_path)
 
-		illustration_count = len(dom.xpath("/html/body/nav/ol/li"))
+		# Get a list of all the integer illustration ids
+		all_illustration_numbers = []
+		for node in dom.xpath("/html/body//a[re:test(@href,'#illustration-[0-9]+$')]"):
+			illustration_number = regex.sub("^.*?#illustration-", "", node.get_attr("href"))
+			if illustration_number.isdigit():
+				all_illustration_numbers.append(int(illustration_number))
+
+		# The shift begins at target_illustration_number, so remove the illustration numbers before it
+		orig_illustration_numbers = [n for n in all_illustration_numbers if n >= target_illustration_number]
+
+		# If incrementing, start at the end and work backwards to keep from duplicating ids
 		if increment:
-			# Range is from COUNT -> target_illustration_number
-			illustration_range = range(illustration_count, target_illustration_number - 1, -1)
+			illustration_numbers = orig_illustration_numbers[::-1]
 		else:
-			# Range is from target_illustration_number -> COUNT
-			illustration_range = range(target_illustration_number, illustration_count + 1, 1)
+			illustration_numbers = orig_illustration_numbers
 
 		# Update image files
-		for illustration_number in illustration_range:
+		for illustration_number in illustration_numbers:
 			new_illustration_number = illustration_number + step
 
 			# Test for previously existing file
@@ -886,7 +913,7 @@ class SeEpub:
 				file_to_rename.rename(illustration_path / f"illustration-{new_illustration_number}{file_to_rename.suffix}")
 
 		# Update the LoI file
-		for illustration_number in illustration_range:
+		for illustration_number in illustration_numbers:
 			new_illustration_number = illustration_number + step
 
 			# Update all the illustrations in the illustrations file
@@ -905,7 +932,7 @@ class SeEpub:
 		for file_path in self.content_path.glob("**/*.xhtml"):
 			dom = self.get_dom(file_path)
 
-			for illustration_number in illustration_range:
+			for illustration_number in illustration_numbers:
 				new_illustration_number = illustration_number + step
 
 				for node in dom.xpath(f"/html/body//figure[@id='illustration-{illustration_number}']"):
@@ -994,12 +1021,10 @@ class SeEpub:
 		If this ebook has not yet been released, set the first release timestamp in the metadata file.
 		"""
 
-		if self.metadata_dom.xpath("/package/metadata/dc:date[text() = '1900-01-01T00:00:00Z']"):
-			now = datetime.datetime.utcnow()
-			now_iso = regex.sub(r"\.[0-9]+$", "", now.isoformat()) + "Z"
-			now_iso = regex.sub(r"\+.+?Z$", "Z", now_iso)
-			now_friendly = f"{now:%B %e, %Y, %l:%M <abbr class=\"eoc\">%p</abbr>}"
-			now_friendly = regex.sub(r"\s+", " ", now_friendly).replace("AM", "a.m.").replace("PM", "p.m.").replace(" <abbr", " <abbr")
+		if self.metadata_dom.xpath("/package/metadata/dc:date[text() = '1900-01-01T00:00:00Z' or text() = '']"):
+			now = datetime.now(timezone.utc)
+			now_iso = se.formatting.generate_iso_timestamp(now)
+			now_friendly = se.formatting.generate_colophon_timestamp(now)
 
 			for node in self.metadata_dom.xpath("/package/metadata/dc:date"):
 				node.set_text(now_iso)
@@ -1007,8 +1032,7 @@ class SeEpub:
 			for node in self.metadata_dom.xpath("/package/metadata/meta[@property='dcterms:modified']"):
 				node.set_text(now_iso)
 
-			with open(self.metadata_file_path, "w", encoding="utf-8") as file:
-				file.write(self.metadata_dom.to_string())
+			self.write_metadata_file()
 
 			for file_path in self.content_path.glob("**/*.xhtml"):
 				dom = self.get_dom(file_path)
@@ -1045,8 +1069,7 @@ class SeEpub:
 		for node in self.metadata_dom.xpath("/package/metadata/meta[@property='se:reading-ease.flesch']"):
 			node.set_text(str(se.formatting.get_flesch_reading_ease(text)))
 
-		with open(self.metadata_file_path, "w", encoding="utf-8") as file:
-			file.write(self.metadata_dom.to_string())
+		self.write_metadata_file()
 
 	def get_word_count(self) -> int:
 		"""
@@ -1086,10 +1109,7 @@ class SeEpub:
 		for node in self.metadata_dom.xpath("/package/metadata/meta[@property='se:word-count']"):
 			node.set_text(str(self.get_word_count()))
 
-		with open(self.metadata_file_path, "r+", encoding="utf-8") as file:
-			file.seek(0)
-			file.write(self.metadata_dom.to_string())
-			file.truncate()
+		self.write_metadata_file()
 
 	def generate_manifest(self) -> se.easy_xml.EasyXmlElement:
 		"""
@@ -1609,3 +1629,126 @@ class SeEpub:
 		# We don't change the anchor or the back ref just yet
 		endnote.source_file = file_name
 		return needs_rewrite, notes_changed
+
+	def split_collection_files(self) -> None:
+		"""
+		If this ebook looks like a collection, split the collection file into multiple different files.
+
+		For example, a file called `poetry.xhtml` containing `poetry.xhtml#poem-1` and `poetry.xhtml#poem-2` would be split into `poem-1.xhtml` and `poem-2.xhtml`.
+
+		This is useful because eink Kobos don't support CSS `break-*` properties, so creating different files forces a page break on Kobos.
+
+		See <https://github.com/kobolabs/epub-spec#css> for the CSS that Kobos support.
+		"""
+
+		for file_path in self.content_path.glob("**/*.xhtml"):
+			dom = self.get_dom(file_path)
+
+			# Does this file looks like a possible collection file?
+			# It does if the only children of `<body>` are `<article>`s and `<section>`s, and there is more than one child.
+			if dom.xpath("/html/body[contains(@epub:type, 'bodymatter') and count(./*[name() = 'article' or name() = 'section']) > 1 and count(./*[name() != 'article' and name() != 'section']) = 0]"):
+				# Yes!
+
+				# Apply any CSS files in the DOM to this file.
+				for node in dom.xpath("/html/head/link[@rel='stylesheet']"):
+					css_filename = (file_path.parent / node.get_attr("href")).resolve()
+					dom.apply_css(self.get_file(css_filename), str(css_filename))
+
+				# Do all of the `<article>`s/`<section>`s have `break-*: page` CSS?
+				if dom.xpath("/html/body[count(./*[name() = 'article' or name() = 'section']) = count(./*[(name() = 'article' or name() = 'section') and @id and attribute::*[re:test(local-name(), '^data-css-break-(before|after)$')]])]"):
+					# Yes. Now split this file!
+
+					# A list of `{"filename": filename, "title": title}`
+					new_files = []
+					dom_template = deepcopy(dom)
+					# Remove the children of `<body>`.
+					for node in dom_template.xpath("/html/body/*"):
+						node.remove()
+
+					for article_node in dom.xpath("/html/body/*[name() = 'article' or name() = 'section']"):
+						new_filename = article_node.get_attr("id") + ".xhtml"
+
+						# Create a new DOM that we write to a new file
+						new_dom = deepcopy(dom_template)
+
+						new_dom.xpath("/html/body")[0].append(article_node)
+
+						title = se.formatting.generate_title(new_dom)
+						for node in new_dom.xpath("/html/head/title"):
+							node.set_text(title)
+
+						with open(file_path.parent / new_filename, "w", encoding="utf-8") as xhtml_file:
+							xhtml_file.write(new_dom.to_string())
+
+						se.formatting.format_xml_file(file_path.parent / new_filename)
+
+						# Get a list of all IDs contained in this new DOM, so we can adjust any links in the ebook later.
+						id_attrs = new_dom.xpath("/html/body/*[name() = 'article' or name() = 'section']//@id")
+
+						new_files.append({"filename": new_filename, "id": article_node.get_attr("id"), "title": title, "descendant_id_attrs": id_attrs})
+
+					# Replace the original file with the new files in the metadata spine
+					original_spine_node = self.metadata_dom.xpath(f"/package/spine/itemref[@idref='{file_path.name}']")[0]
+					for new_file in new_files:
+						original_spine_node.insert_before(se.easy_xml.EasyXmlElement(f"<itemref idref=\"{new_file['filename']}\"/>"))
+
+					original_spine_node.remove()
+
+					# Generate the new ToC.
+					# Don't use `self.generate_toc()` because the producer may have edited the ToC by hand.
+					toc_dom = self.get_dom(self.toc_path)
+					toc_node = toc_dom.xpath(f"/html/body/nav[@epub:type='toc']/ol//li[./a[re:test(@href, '^text/{file_path.name}')]]")[0]
+					for new_file in new_files:
+						li_node = se.easy_xml.EasyXmlElement("<li/>")
+						li_node.append(se.easy_xml.EasyXmlElement(f"""<a href="text/{new_file['filename']}">{new_file['title']}</a>"""))
+						toc_node.insert_before(li_node)
+
+					# Remove any ToC nodes that mention this file
+					for node in toc_dom.xpath(f"/html/body/nav[@epub:type='toc']/ol//li[./a[re:test(@href, '^text/{file_path.name}')]]"):
+						node.remove()
+
+					# If the ToC has a landmark node mentioning this file, replace it with the first `<article>`.
+					for node in toc_dom.xpath(f"/html/body/nav[@epub:type='landmarks']/ol//li/a[re:test(@href, '^text/{file_path.name}')]"):
+						node.set_attr("href", f"text/{new_files[0]['filename']}")
+
+					with open(self.toc_path, "w", encoding="utf-8") as file:
+						file.write(toc_dom.to_string())
+
+					se.formatting.format_xml_file(self.toc_path)
+
+					# Remove the original file.
+					file_path.unlink()
+
+					# Generate the new manifest.
+					for node in self.metadata_dom.xpath("/package/manifest"):
+						node.replace_with(self.generate_manifest())
+
+					self.write_metadata_file()
+
+					se.formatting.format_xml_file(self.metadata_file_path)
+
+					# Now iterate over all files in the ebook to update any links that might refer to the file we just split.
+					for nested_file_path in self.content_path.glob("**/*.xhtml"):
+						dom = self.get_dom(nested_file_path)
+
+						# Replace links to the original file with no anchor with a link to the first `<article>`
+						for node in dom.xpath(f"/html/body//a[re:test(@href, '^(.+/)?{file_path.name}$')]"):
+							node.set_attr("href", node.get_attr("href").replace(file_path.name, new_files[0]['filename']))
+
+						# Replace anchored links with the new file
+						for node in dom.xpath(f"/html/body//a[re:test(@href, '^(.+/)?{file_path.name}#')]"):
+							old_target_id = regex.sub(fr"^(.+/)?{file_path.name}#", "", node.get_attr("href"))
+
+							for new_file in new_files:
+								# Does the old target ID point to the top of a new file? If so, link directly to the new file, without an anchor.
+								if old_target_id == new_file['id']:
+									node.set_attr("href", regex.sub(fr"^(.+/)?{file_path.name}#.+", fr"\1{new_file['filename']}", node.get_attr("href")))
+									break
+
+								# Does the old target ID exist as a descendent of this new file?
+								if old_target_id in new_file['descendant_id_attrs']:
+									node.set_attr("href", regex.sub(fr"^(.+/)?{file_path.name}#(.+)", fr"\1{new_file['filename']}#\2", node.get_attr("href")))
+									break
+
+						with open(nested_file_path, "w", encoding="utf-8") as file:
+							file.write(dom.to_string())

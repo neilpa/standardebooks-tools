@@ -4,7 +4,7 @@ Defines the EasyXmlTree class, which is a convenience wrapper around etree.
 The class exposes some helpful functions like css_select() and xpath().
 """
 
-from typing import Dict, List, Union, Optional
+from typing import Dict, List, Union, Optional, Any
 import unicodedata
 
 import regex
@@ -90,11 +90,13 @@ class EasyXmlTree:
 		except parser.SelectorSyntaxError as ex:
 			raise se.InvalidCssException(f"Invalid selector: [css]{selector}[/]") from ex
 
-	def xpath(self, selector: str, return_string: bool = False):
+	def xpath(self, selector: str, return_string: bool = False) -> Any:
 		"""
 		Shortcut to select elements based on xpath selector.
 
-		If return_string is true, return a single string value instead of a list.
+		If `return_string` is `True`, return a single string value instead of a list.
+
+		Return `Any` to quiet `mypy` for now. Should be upgraded to a real type hint ASAP.
 		"""
 
 		result: List[Union[str, EasyXmlElement, float]] = []
@@ -363,9 +365,11 @@ class EasyXmlElement:
 
 		return self.lxml_element.set(self._replace_shorthand_namespaces(attribute), value)
 
-	def xpath(self, selector: str, return_string: bool = False):
+	def xpath(self, selector: str, return_string: bool = False) -> Any:
 		"""
 		Shortcut to select elements based on xpath selector.
+
+		Return `Any` to quiet `mypy` for now. Should be upgraded to a real type hint ASAP.
 		"""
 
 		result: List[Union[str, EasyXmlElement, float]] = []
@@ -458,13 +462,13 @@ class EasyXmlElement:
 		children.reverse()
 
 		# This will *move* each child element node to *after* the current element.
-		# Since any following text is stored in the child element's .tail, this will *also*
+		# Since any following text is stored in the child element's `.tail`, this will *also*
 		# move that text.
 		for child in children:
 			self.lxml_element.addnext(child)
 
 		# Now we've moved all child elements and the text following them. But what if there's
-		# text *before* any child elements? That is stored in the .text property.
+		# text *before* any child elements? That is stored in the `.text` property.
 		if self.lxml_element.text:
 			prev = self.lxml_element.getprevious()
 			if prev is None:
@@ -478,6 +482,17 @@ class EasyXmlElement:
 					prev.tail = prev.tail + self.lxml_element.text
 				else:
 					prev.tail = self.lxml_element.text
+
+		# If the element we're unwrapping has a `.tail`, place it now.
+		if self.lxml_element.tail and children:
+			# This is the *last* child because we reversed the children earlier.
+			last_child_node = children[0]
+			if last_child_node.tail:
+				last_child_node.tail = last_child_node.tail + self.lxml_element.tail
+			else:
+				last_child_node.tail = self.lxml_element.tail
+
+			self.lxml_element.tail = None
 
 		# This calls the EasyXmlTree.remove() function, not an lxml function
 		self.remove()
@@ -505,11 +520,11 @@ class EasyXmlElement:
 		Remove this node and replace it with the passed node
 		"""
 
-		# lxml.addnext() moves this element's tail to the new element
+		# `lxml.addnext()` moves this element's tail to the new element
 		if isinstance(node, EasyXmlElement):
-			self.lxml_element.addnext(node.lxml_element)
+			self.lxml_element.addprevious(node.lxml_element)
 		else:
-			self.lxml_element.addnext(node)
+			self.lxml_element.addprevious(node)
 
 		self.remove()
 
@@ -543,6 +558,16 @@ class EasyXmlElement:
 
 		self.lxml_element.insert(0, target)
 		self.lxml_element.text = ""
+
+	def insert_before(self, node) -> None:
+		"""
+		Place a node before this node.
+		"""
+
+		if isinstance(node, EasyXmlElement):
+			self.lxml_element.addprevious(node.lxml_element)
+		else:
+			self.lxml_element.addprevious(node)
 
 	def set_text(self, string: str) -> None:
 		"""

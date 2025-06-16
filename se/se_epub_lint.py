@@ -240,7 +240,7 @@ METADATA
 "m-068", "[xml]<dc:title>[/] missing matching [xml]<meta property=\"title-type\">[/]."
 "m-069", "[text]comprised of[/] in metadata. Hint: Is there a better phrase to use here?"
 "m-070", "Glossary entries not present in the text:"
-"m-071", "DP link must be exactly [text]The Online Distributed Proofreading Team[/]."
+"m-071", "DP link must be exactly [text]Distributed Proofreaders[/]."
 "m-072", "DP OLS link must be exactly [text]Distributed Proofreaders Open Library System[/]."
 "m-073", "Anonymous contributor values must be exactly [text]Anonymous[/]."
 "m-074", "Multiple transcriptions found in metadata, but no link to [text]EBOOK_URL#transcriptions[/]."
@@ -248,6 +248,11 @@ METADATA
 "m-076", "gutenberg.net.au URL should not have leading [text]www.[/]."
 "m-077", "MathML found in ebook, but no [attr]schema:accessibilityFeature[/] properties set to [val]MathML[/] and [val]describedMath[/] in metadata."
 "m-078", "MathML found in ebook, but no MathML accessibility [xml]<ProductFormFeatureValue>17</ProductFormFeatureValue>[/] set in ONIX data."
+"m-079", "Ebook looks like a collection, but no [xml]<meta property=\"se:is-a-collection\">true</meta>[/] element in metadata."
+"m-080", "DP link must be exactly [text]Distributed Proofreaders Canada[/]."
+"m-081", "When published between a range of years, the text must be [text]published between year1 and year2[/]."
+"m-082", "Faded Page link text must be exactly [text]Faded Page[/]."
+"m-083", "[xhtml]<meta property=\"title-type\">[/] element without sibling element with contents of [val]main[/], [val]subtitle[/], [val]extended[/], or [val]short[/]."
 
 SEMANTICS & CONTENT
 "s-001", "Illegal numeric entity (like [xhtml]&#913;[/])."
@@ -480,6 +485,7 @@ TYPOS
 "y-020", "Possible typo: consecutive comma-period ([text],.[/])."
 "y-021", "Possible typo: closing [text]’[/] without opening [text]‘[/]."
 "y-022", "Possible typo: consecutive quotations without intervening text, e.g. [text]“…” “…”[/]."
+"y-023", "Possible typo: quotation mark within words."
 "y-024", "Possible typo: dash before [text]the/there/is/and/or/they/when[/] probably should be em-dash."
 "y-025", "Possible typo: letter/comma/quote mark/letter with no intervening space."
 "y-026", "Possible typo: no punctuation before conjunction [text]But/And/For/Nor/Yet/Or[/]."
@@ -490,9 +496,7 @@ TYPOS
 "y-031", "Possible typo: dialog tag missing punctuation."
 "y-032", "Possible typo: italics running into preceding or following characters."
 "y-033", "Possible typo: three-em-dash obscuring an entire word, but not preceded by a space."
-UNUSED
-vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-"y-023", "Possible typo: two opening quotation marks in a run. Hint: Nested quotes should switch between [text]“[/] and [text]‘[/]"
+"y-034", "Possible typo: [text].[/] embedded in word. Hint: Abbreviations must be in an [xhtml]<abbr>[/] element."
 """
 
 class LintMessage:
@@ -908,6 +912,10 @@ def _lint_metadata_checks(self) -> list:
 	nodes = self.metadata_dom.xpath("/package/metadata//*[re:test(., '[,;][a-z]', 'i')]")
 	if nodes:
 		messages.append(LintMessage("y-002", "Possible typo: punctuation followed directly by a letter, without a space.", se.MESSAGE_TYPE_WARNING, self.metadata_file_path, [node.to_string() for node in nodes]))
+
+	nodes = self.metadata_dom.xpath("/package/metadata/meta[@property='title-type' and text()='main' and not(following-sibling::meta[@property='title-type'])] | /package/metadata/meta[@property='title-type' and (text()='subtitle' or text()='extended' or text()='short') and not(preceding-sibling::meta[@property='title-type' and text()='main'])]")
+	if nodes:
+		messages.append(LintMessage("m-083", "[xhtml]<meta property=\"title-type\">[/] element without sibling element with contents of [val]main[/], [val]subtitle[/], [val]extended[/], or [val]short[/].", se.MESSAGE_TYPE_ERROR, self.metadata_file_path, [node.to_string() for node in nodes]))
 
 	return messages
 
@@ -1325,94 +1333,47 @@ def _lint_special_file_checks(self, filename: Path, dom: se.easy_xml.EasyXmlTree
 	if self.is_se_ebook and special_file in ("colophon", "imprint"):
 		if len(source_links) <= 2:
 			# Check that links back to sources are represented correctly
-			nodes = dom.xpath("/html/body//a[@href='https://www.pgdp.net' and text()!='The Online Distributed Proofreading Team']")
+			nodes = dom.xpath("/html/body//a[re:test(@href, '^https://[^\"]*?hathitrust.org') and re:test(text(), '[Hh]athi') and not(text()='HathiTrust Digital Library')]")
 			if nodes:
-				messages.append(LintMessage("m-071", "DP link must be exactly [text]The Online Distributed Proofreading Team[/].", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
+				messages.append(LintMessage("m-041", "Hathi Trust link text must be exactly [text]HathiTrust Digital Library[/].", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
+
+			nodes = dom.xpath("/html/body//a[@href='https://www.pgdp.net' and text()!='Distributed Proofreaders']")
+			if nodes:
+				messages.append(LintMessage("m-071", "DP link must be exactly [text]Distributed Proofreaders[/].", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
 
 			nodes = dom.xpath("/html/body//a[re:test(@href, '^https://www.pgdp.org/ols/') and text()!='Distributed Proofreaders Open Library System']")
 			if nodes:
 				messages.append(LintMessage("m-072", "DP OLS link must be exactly [text]Distributed Proofreaders Open Library System[/].", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
 
-			nodes = dom.xpath("/html/body//a[re:test(@href, '^https://[^\"]*?hathitrust.org') and re:test(text(), '[Hh]athi') and not(text()='HathiTrust Digital Library')]")
+			nodes = dom.xpath("/html/body//a[@href='https://www.pgdpcanada.net' and text()!='Distributed Proofreaders Canada']")
 			if nodes:
-				messages.append(LintMessage("m-041", "Hathi Trust link text must be exactly [text]HathiTrust Digital Library[/].", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
+				messages.append(LintMessage("m-080", "DP link must be exactly [text]Distributed Proofreaders Canada[/].", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
+
+			nodes = dom.xpath("/html/body//a[re:test(@href, '^https://www.fadedpage.com') and not(text()='Faded Page')]")
+			if nodes:
+				messages.append(LintMessage("m-082", "Faded Page link text must be exactly [text]Faded Page[/].", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
 
 		nodes = dom.xpath("/html/body//p[re:test(., '\\ba transcription\\b') and ./a[contains(@href, '#transcriptions')]]")
 		if nodes:
 			messages.append(LintMessage("t-071", "Multiple transcriptions listed, but preceding text is [text]a transcription[/].", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
 
 	if self.is_se_ebook and special_file == "colophon":
+		if self.metadata_dom.xpath("/package/metadata/meta[@property='role' and text()='trl']") and "translated from" not in file_contents:
+			messages.append(LintMessage("m-025", "Translator found in metadata, but no [text]translated from LANG[/] block in colophon.", se.MESSAGE_TYPE_ERROR, filename))
+
 		# Check for illegal Wikipedia URLs
 		nodes = dom.xpath("/html/body//a[contains(@href, '.m.wikipedia.org')]")
 		if nodes:
 			messages.append(LintMessage("m-026", "Illegal [url]https://*.m.wikipedia.org[/] URL. Hint: use non-mobile Wikipedia URLs.", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
 
-		# Check for non-English Wikipedia URLs
-		nodes = dom.xpath("/html/body//a[re:test(@href, 'https://(?!en)[a-z]{2,}\\.wikipedia\\.org')]")
-		if nodes:
-			messages.append(LintMessage("m-043", "Non-English Wikipedia URL.", se.MESSAGE_TYPE_ERROR, self.metadata_file_path, [node.to_string() for node in nodes]))
-
-		# Check for wrong grammar filled in from template
-		nodes = dom.xpath("/html/body//a[starts-with(@href, 'https://books.google.com/') or starts-with(@href, 'https://www.google.com/books/')][(preceding-sibling::text()[normalize-space(.)][1])[re:test(., '\\bthe$')]]")
-		if nodes:
-			messages.append(LintMessage("s-016", "Incorrect [text]the[/] before Google Books link.", se.MESSAGE_TYPE_ERROR, filename, ["the<br/>\n" + node.to_string() for node in nodes]))
-
 		se_url = self.generated_identifier.replace("url:", "")
 		if not dom.xpath(f"/html/body//a[@href='{se_url}' and text()='{se_url.replace('https://', '')}']"):
 			messages.append(LintMessage("m-035", f"Unexpected S.E. identifier in colophon. Expected: [url]{se_url}[/].", se.MESSAGE_TYPE_ERROR, filename))
-
-		if self.metadata_dom.xpath("/package/metadata/meta[@property='role' and text()='trl']") and "translated from" not in file_contents:
-			messages.append(LintMessage("m-025", "Translator found in metadata, but no [text]translated from LANG[/] block in colophon.", se.MESSAGE_TYPE_ERROR, filename))
-
-		if ebook_flags["has_multiple_transcriptions"] and not dom.xpath("/html/body//a[contains(@href, '#transcriptions')]"):
-			messages.append(LintMessage("m-074", "Multiple transcriptions found in metadata, but no link to [text]EBOOK_URL#transcriptions[/].", se.MESSAGE_TYPE_ERROR, filename))
-
-		if ebook_flags["has_multiple_page_scans"] and not dom.xpath("/html/body//a[contains(@href, '#page-scans')]"):
-			messages.append(LintMessage("m-075", "Multiple page scans found in metadata, but no link to [text]EBOOK_URL#page-scans[/].", se.MESSAGE_TYPE_ERROR, filename))
-
-		# Check that the formula changed from the default if we added 'various sources'
-		if ebook_flags["has_multiple_transcriptions"] or ebook_flags["has_multiple_page_scans"]:
-			nodes = dom.xpath("/html/body//a[text() = 'various sources' and not(re:test(preceding-sibling::br[1]/preceding-sibling::node()[1], '(digital scans|transcriptions) from\\s*$'))]")
-			if nodes:
-				messages.append(LintMessage("t-072", "[text]various sources[/] link not preceded by [text]from[/].", se.MESSAGE_TYPE_ERROR, filename))
 
 		# Check if we forgot to fill any variable slots
 		missing_colophon_vars = [var for var in SE_VARIABLES if regex.search(fr"\b{var}\b", file_contents)]
 		if missing_colophon_vars:
 			messages.append(LintMessage("m-036", "Variable not replaced with value.", se.MESSAGE_TYPE_ERROR, filename, missing_colophon_vars))
-
-		# Check that we have <br/>s at the end of lines
-		# First, check for b or a elements that are preceded by a newline but not by a br
-		nodes = [node.to_string() for node in dom.xpath("/html/body/section/p/*[name()='b' or name()='a'][(preceding-sibling::node()[1])[contains(., '\n')]][not((preceding-sibling::node()[2])[self::br]) or (normalize-space(preceding-sibling::node()[1]) and re:test(preceding-sibling::node()[1], '\\n\\s*$')) ]")]
-		# Next, check for text nodes that contain newlines but are not preceded by brs
-		nodes += [node.strip() for node in dom.xpath("/html/body/section/p/text()[contains(., '\n') and normalize-space(.)][(preceding-sibling::node()[1])[not(self::br)]]")]
-		if nodes:
-			messages.append(LintMessage("s-053", "Colophon line not preceded by [xhtml]<br/>[/].", se.MESSAGE_TYPE_ERROR, filename, nodes))
-
-		# Is there a comma after a producer name, if there's only two producers?
-		nodes = dom.xpath("/html/body/section/p/*[name()='b' or name()='a'][(following-sibling::node()[1])[normalize-space(.)=', and']][(preceding-sibling::*[1])[name()='br']]")
-		if nodes:
-			messages.append(LintMessage("t-006", "Comma after producer name, but there are only two producers.", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
-
-		nodes = dom.xpath("/html/body//b[re:test(., 'anonymous', 'i') and re:test(@epub:type, 'z3998:.*?name')]")
-		if nodes:
-			messages.append(LintMessage("s-092", "Anonymous contributor with [val]z3998:*-name[/] semantic.", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
-
-		# Check for anonymous volunteers misrepresented in the colophon. Note that we only match SE producers and transcribers, because
-		# a cover art artist can also be anonymous but they're not volunteers.
-		nodes = dom.xpath("/html/body//b[re:test(., 'anonymous', 'i') and text() != 'An Anonymous Volunteer' and (preceding-sibling::a[@href='https://standardebooks.org'])]")
-		if nodes:
-			messages.append(LintMessage("s-100", "Anonymous digital contributor value not exactly [text]An Anonymous Volunteer[/].", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
-
-		# Check for primary contributors misrepresented in the colophon. these differ from ebook production volunteers.
-		nodes = dom.xpath("/html/body//b[re:test(., 'anonymous', 'i') and text() != 'Anonymous' and (preceding-sibling::node()[contains(., 'The cover page')] or preceding-sibling::i[contains(@epub:type, 'se:name.publication')])]")
-		if nodes:
-			messages.append(LintMessage("s-101", "Anonymous primary contributor value not exactly [text]Anonymous[/].", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
-
-		# Is there a page scan link in the colophon, but missing in the metadata?
-		for node in dom.xpath("/html/body//a[re:test(@href, '(gutenberg\\.org/ebooks/[0-9]+|hathitrust\\.org|/archive\\.org|books\\.google\\.com|www\\.google\\.com/books/)')]"):
-			if not self.metadata_dom.xpath(f"/package/metadata/dc:source[contains(text(), {se.easy_xml.escape_xpath(node.get_attr('href'))})]"):
-				messages.append(LintMessage("m-059", f"Link to [url]{node.get_attr('href')}[/] found in colophon, but missing matching [xhtml]dc:source[/] element in metadata.", se.MESSAGE_TYPE_ERROR, self.metadata_file_path))
 
 		# Are the sources represented correctly?
 		# We don't have a standard yet for more than two sources (transcription and scan) so just ignore that case for now.
@@ -1432,6 +1393,66 @@ def _lint_special_file_checks(self, filename: Path, dom: se.easy_xml.EasyXmlTree
 
 				if ("books.google.com" in link or "www.google.com/books/" in link) and f"<a href=\"{link}\">Google Books</a>" not in file_contents:
 					messages.append(LintMessage("m-037", f"Transcription/page scan source link not found. Expected: [xhtml]<a href=\"{link}\">Google Books</a>[/].", se.MESSAGE_TYPE_ERROR, filename))
+
+		# Check for non-English Wikipedia URLs
+		nodes = dom.xpath("/html/body//a[re:test(@href, 'https://(?!en)[a-z]{2,}\\.wikipedia\\.org')]")
+		if nodes:
+			messages.append(LintMessage("m-043", "Non-English Wikipedia URL.", se.MESSAGE_TYPE_ERROR, self.metadata_file_path, [node.to_string() for node in nodes]))
+
+		# Is there a page scan link in the colophon, but missing in the metadata?
+		for node in dom.xpath("/html/body//a[re:test(@href, '(gutenberg\\.org/ebooks/[0-9]+|hathitrust\\.org|/archive\\.org|books\\.google\\.com|www\\.google\\.com/books/)')]"):
+			if not self.metadata_dom.xpath(f"/package/metadata/dc:source[contains(text(), {se.easy_xml.escape_xpath(node.get_attr('href'))})]"):
+				messages.append(LintMessage("m-059", f"Link to [url]{node.get_attr('href')}[/] found in colophon, but missing matching [xhtml]dc:source[/] element in metadata.", se.MESSAGE_TYPE_ERROR, self.metadata_file_path))
+
+		if ebook_flags["has_multiple_transcriptions"] and not dom.xpath("/html/body//a[contains(@href, '#transcriptions')]"):
+			messages.append(LintMessage("m-074", "Multiple transcriptions found in metadata, but no link to [text]EBOOK_URL#transcriptions[/].", se.MESSAGE_TYPE_ERROR, filename))
+
+		if ebook_flags["has_multiple_page_scans"] and not dom.xpath("/html/body//a[contains(@href, '#page-scans')]"):
+			messages.append(LintMessage("m-075", "Multiple page scans found in metadata, but no link to [text]EBOOK_URL#page-scans[/].", se.MESSAGE_TYPE_ERROR, filename))
+
+		# A range of years for published should be "published between X and Y"
+		nodes = dom.xpath(f"/html/body//p[re:test(., '\\bpublished (in|between) [0-9]+{se.WORD_JOINER}?–{se.WORD_JOINER}?[0-9]+\\b')]")
+		if nodes:
+			messages.append(LintMessage("m-081", "When published between a range of years, the text must be [text]published between year1 and year2[/].", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
+
+		# Check for wrong grammar filled in from template
+		nodes = dom.xpath("/html/body//a[starts-with(@href, 'https://books.google.com/') or starts-with(@href, 'https://www.google.com/books/')][(preceding-sibling::text()[normalize-space(.)][1])[re:test(., '\\bthe$')]]")
+		if nodes:
+			messages.append(LintMessage("s-016", "Incorrect [text]the[/] before Google Books link.", se.MESSAGE_TYPE_ERROR, filename, ["the<br/>\n" + node.to_string() for node in nodes]))
+
+		# Check that we have <br/>s at the end of lines
+		# First, check for b or a elements that are preceded by a newline but not by a br
+		nodes = [node.to_string() for node in dom.xpath("/html/body/section/p/*[name()='b' or name()='a'][(preceding-sibling::node()[1])[contains(., '\n')]][not((preceding-sibling::node()[2])[self::br]) or (normalize-space(preceding-sibling::node()[1]) and re:test(preceding-sibling::node()[1], '\\n\\s*$')) ]")]
+		# Next, check for text nodes that contain newlines but are not preceded by brs
+		nodes += [node.strip() for node in dom.xpath("/html/body/section/p/text()[contains(., '\n') and normalize-space(.)][(preceding-sibling::node()[1])[not(self::br)]]")]
+		if nodes:
+			messages.append(LintMessage("s-053", "Colophon line not preceded by [xhtml]<br/>[/].", se.MESSAGE_TYPE_ERROR, filename, nodes))
+
+		nodes = dom.xpath("/html/body//b[re:test(., 'anonymous', 'i') and re:test(@epub:type, 'z3998:.*?name')]")
+		if nodes:
+			messages.append(LintMessage("s-092", "Anonymous contributor with [val]z3998:*-name[/] semantic.", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
+
+		# Check for anonymous volunteers misrepresented in the colophon. Note that we only match SE producers and transcribers, because
+		# a cover art artist can also be anonymous but they're not volunteers.
+		nodes = dom.xpath("/html/body//b[re:test(., 'anonymous', 'i') and text() != 'An Anonymous Volunteer' and (preceding-sibling::a[@href='https://standardebooks.org'])]")
+		if nodes:
+			messages.append(LintMessage("s-100", "Anonymous digital contributor value not exactly [text]An Anonymous Volunteer[/].", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
+
+		# Check for primary contributors misrepresented in the colophon. these differ from ebook production volunteers.
+		nodes = dom.xpath("/html/body//b[re:test(., 'anonymous', 'i') and text() != 'Anonymous' and (preceding-sibling::node()[contains(., 'The cover page')] or preceding-sibling::i[contains(@epub:type, 'se:name.publication')])]")
+		if nodes:
+			messages.append(LintMessage("s-101", "Anonymous primary contributor value not exactly [text]Anonymous[/].", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
+
+		# Is there a comma after a producer name, if there's only two producers?
+		nodes = dom.xpath("/html/body/section/p/*[name()='b' or name()='a'][(following-sibling::node()[1])[normalize-space(.)=', and']][(preceding-sibling::*[1])[name()='br']]")
+		if nodes:
+			messages.append(LintMessage("t-006", "Comma after producer name, but there are only two producers.", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
+
+		# Check that the formula changed from the default if we added 'various sources'
+		if ebook_flags["has_multiple_transcriptions"] or ebook_flags["has_multiple_page_scans"]:
+			nodes = dom.xpath("/html/body//a[text() = 'various sources' and not(re:test(preceding-sibling::br[1]/preceding-sibling::node()[1], '(digital scans|transcriptions) from\\s*$'))]")
+			if nodes:
+				messages.append(LintMessage("t-072", "[text]various sources[/] link not preceded by [text]from[/].", se.MESSAGE_TYPE_ERROR, filename))
 
 	# If we're in the imprint, are the sources represented correctly?
 	# We don't have a standard yet for more than two sources (transcription and scan) so just ignore that case for now.
@@ -1570,7 +1591,7 @@ def _lint_xhtml_css_checks(filename: Path, dom: se.easy_xml.EasyXmlTree, local_c
 
 	# Do we have any elements that have specified border color?
 	# `transparent` and `none` are allowed values for border-color
-	if dom.xpath("/html/body//*[attribute::*[re:test(local-name(), 'data-css-border.+?-color') and text() != 'transparent' and text != 'none']]"):
+	if dom.xpath("/html/body//*[attribute::*[re:test(local-name(), 'data-css-border.+?-color') and text() != 'transparent' and text() != 'none']]"):
 		messages.append(LintMessage("c-004", "Don’t specify border colors, so that reading systems can adjust for night mode.", se.MESSAGE_TYPE_WARNING, local_css_path))
 
 	# Check that footers have the expected styling
@@ -1951,7 +1972,8 @@ def _lint_xhtml_syntax_checks(self, filename: Path, dom: se.easy_xml.EasyXmlTree
 		messages.append(LintMessage("s-034", "Semantic used from the z3998 vocabulary, but the same semantic exists in the EPUB vocabulary.", se.MESSAGE_TYPE_ERROR, filename, [attr for (attr, bare_attr) in unnecessary_z3998_attrs]))
 
 	# Check if language tags in individual files match the language in the metadata file
-	if filename.name not in IGNORED_FILENAMES:
+	# loi is in IGNORED_FILENAMES, but should not be excluded from this particular test
+	if filename.name not in IGNORED_FILENAMES or filename.name == "loi.xhtml":
 		file_language = dom.xpath("/html/@xml:lang", True)
 		if language != file_language:
 			messages.append(LintMessage("s-033", f"File language is [val]{file_language}[/], but [path][link=file://{self.metadata_file_path}]{self.metadata_file_path.name}[/][/] language is [val]{language}[/].", se.MESSAGE_TYPE_WARNING, filename))
@@ -2139,7 +2161,7 @@ def _lint_xhtml_syntax_checks(self, filename: Path, dom: se.easy_xml.EasyXmlTree
 
 	# Check for table headers that don't have content, which is an accessibility issue.
 	# Note that @aria-label and @title should (apparently) not be used for table headers
-	nodes = dom.xpath("/html/body//th[not(text())]")
+	nodes = dom.xpath("/html/body//th[text() = '']")
 	if nodes:
 		messages.append(LintMessage("s-074", "[xhtml]<th>[/] element with no text content should be a [xhtml]<td>[/] element instead.", se.MESSAGE_TYPE_ERROR, filename, [node.to_string() for node in nodes]))
 
@@ -2149,7 +2171,7 @@ def _lint_xhtml_syntax_checks(self, filename: Path, dom: se.easy_xml.EasyXmlTree
 		messages.append(LintMessage("s-075", "[xhtml]<body>[/] element with direct child that is not [xhtml]<section>[/], [xhtml]<article>[/], or [xhtml]<nav>[/].", se.MESSAGE_TYPE_ERROR, filename))
 
 	# Check for dedications with letter semantics
-	nodes = dom.xpath("/html/body//section[contains(@epub:type, 'dedication') and (descendant-or-self::*[contains(@epub:type, 'z3998:letter')] or .//*[re:test(@epub:type, 'z3998:(sender|valediction|recipient)')])]")
+	nodes = dom.xpath("/html/body//section[contains(@epub:type, 'dedication') and (descendant-or-self::*[contains(@epub:type, 'z3998:letter')] or .//*[re:test(@epub:type, 'z3998:(salutation|sender|valediction|recipient|postscript)')])]")
 	if nodes:
 		messages.append(LintMessage("s-076", "Dedication with letter semantics. Hint: Dedications are never letters, even if they appear to be addressed to someone.", se.MESSAGE_TYPE_ERROR, filename))
 
@@ -2325,7 +2347,7 @@ def _lint_xhtml_typography_checks(filename: Path, dom: se.easy_xml.EasyXmlTree, 
 	# Check for possessive 's within name italics, but not in ignored files like the colophon which we know have no possessives
 	# Allow some known exceptions like `Harper's`, etc.
 	if filename.name not in IGNORED_FILENAMES:
-		nodes = dom.xpath("/html/body//i[contains(@epub:type, 'se:name.') and re:test(., '’s$') and not(contains(@epub:type, 'se:name.publication.') and re:test(., '(Pearson’s|Harper’s|Blackwood’s|Fraser’s|Baedeker’s)$'))]")
+		nodes = dom.xpath("/html/body//i[contains(@epub:type, 'se:name.') and re:test(., '’s$') and not(contains(@epub:type, 'se:name.publication.') and re:test(., '(Pearson’s|Harper’s|Blackwood’s|Fraser’s|Baedeker’s|Lloyd’s)$'))]")
 		if nodes:
 			messages.append(LintMessage("t-007", "Possessive [text]’s[/] within name italics. If the name in italics is doing the possessing, [text]’s[/] goes outside italics.", se.MESSAGE_TYPE_WARNING, filename, [node.to_string() for node in nodes]))
 
@@ -2527,7 +2549,8 @@ def _lint_xhtml_typography_checks(filename: Path, dom: se.easy_xml.EasyXmlTree, 
 	temp_xhtml = regex.sub(r"<title[^>]*?>.+?</title>", "", file_contents) # Remove <title> because it might contain something like <title>Chapter 2: The Antechamber of M. de Tréville</title>
 	temp_xhtml = regex.sub(r"<abbr[^>]*?>", "<abbr>", temp_xhtml) # Replace things like <abbr xml:lang="la">
 	temp_xhtml = regex.sub(r"<img[^>]*?>", "", temp_xhtml) # Remove <img alt> attributes
-	temp_xhtml = temp_xhtml.replace("A.B.C.", "X") # Remove A.B.C, which is not an abbreviations.
+	temp_xhtml = temp_xhtml.replace("A.B.C.", "X") # Remove A.B.C, which is not an abbreviation.
+	temp_xhtml = temp_xhtml.replace("X.Y.Z.", "X") # Remove X.Y.Z., which is usually used in the same sense as `A.B.C.` and is also not an abbreviation.
 	# Note the regex also excludes preceding numbers, so that we can have inline numbering like:
 	# "A number of questions: 1. regarding those who make heretics; 2. concerning those who were made heretics..."
 	matches = regex.findall(r"[^\s0-9]+\.\s+[\p{Lowercase_Letter}](?!’[\p{Uppercase_Letter}])[\p{Lowercase_Letter}]+", temp_xhtml)
@@ -2813,7 +2836,7 @@ def _lint_xhtml_typography_checks(filename: Path, dom: se.easy_xml.EasyXmlTree, 
 	if nodes:
 		messages.append(LintMessage("t-076", "Grapheme or phoneme not italicized. Hint: Dialect with missing letters should mark missing letters with [text]’[/].", se.MESSAGE_TYPE_WARNING, filename, nodes))
 
-	nodes = dom.xpath("/html/body//text()[re:test(., '[:;!\\?][“‘]')]")
+	nodes = dom.xpath("/html/body//text()[re:test(., '[:;!\\?\\.][“‘]')]")
 	if nodes:
 		messages.append(LintMessage("t-077", "Punctuation followed by opening quotation.", se.MESSAGE_TYPE_WARNING, filename, nodes))
 
@@ -3044,8 +3067,15 @@ def _lint_xhtml_typo_checks(filename: Path, dom: se.easy_xml.EasyXmlTree, file_c
 		messages.append(LintMessage("y-018", "Possible typo: [text]‘[/] followed by space.", se.MESSAGE_TYPE_WARNING, filename, typos))
 
 	# Check for closing rdquo without opening ldquo.
-	# Remove tds in case rdquo means "ditto mark"
-	typos = regex.findall(r"”[^“‘]+?”", regex.sub(r"<td[^>]*?>[”\s]+?(<a .+?epub:type=\"noteref\">.+?</a>)?</td>", "", file_contents))
+	# First, remove `<td>` and `<th>` in case rdquo means "ditto mark". Also remove noterefs which may interfere with this test.
+	dom_copy = deepcopy(dom)
+	for node in dom_copy.xpath("/html/body//table//a[contains(@epub:type, 'noteref')]"):
+		node.remove()
+
+	for node in dom_copy.xpath("/html/body//table//*[re:test(name(), 'td|th') and re:test(., '\\s*”\\s*')]"):
+		node.remove()
+
+	typos = regex.findall(r"”[^“‘]+?”", regex.sub(r"<t[dh][^>]*?>[”\s]+?(<a .+?epub:type=\"noteref\">.+?</a>)?</t[dh]>", "", dom_copy.to_string()))
 
 	# We create a filter to try to exclude nested quotations
 	# Remove tags in case they're enclosing punctuation we want to match against at the end of a sentence.
@@ -3073,6 +3103,12 @@ def _lint_xhtml_typo_checks(filename: Path, dom: se.easy_xml.EasyXmlTree, file_c
 	typos = [node.to_string() for node in dom.xpath("/html/body//p[re:test(., '^“[^”]+?”\\s“[^”]+?”$')]")]
 	if typos:
 		messages.append(LintMessage("y-022", "Possible typo: consecutive quotations without intervening text, e.g. [text]“…” “…”[/].", se.MESSAGE_TYPE_WARNING, filename, typos))
+
+	# Check for question marks within words
+	# Check for at least two letters following the question mark to ensure we matched a word-like thing, and not an endnote startin with a letter like <https://standardebooks.org/ebooks/john-reed/ten-days-that-shook-the-world>
+	typos = [node.to_string() for node in dom.xpath("/html/body//p[re:test(., '[a-z]\\?[a-z]{2,}', 'i')]")]
+	if typos:
+		messages.append(LintMessage("y-023", "Possible typo: question mark within words.", se.MESSAGE_TYPE_WARNING, filename, typos))
 
 	# Check for dashes instead of em-dashes
 	typos = [node.to_string() for node in dom.xpath("/html/body//p[re:test(., '\\s[a-z]+-(the|there|is|and|or|they|when)\\s')]")]
@@ -3125,6 +3161,31 @@ def _lint_xhtml_typo_checks(filename: Path, dom: se.easy_xml.EasyXmlTree, file_c
 	nodes = dom.xpath(f"/html/body//p[re:test(., '[^>“(\\s{se.WORD_JOINER}]{se.WORD_JOINER}?⸻')]")
 	if nodes:
 		messages.append(LintMessage("y-033", "Possible typo: three-em-dash obscuring an entire word, but not preceded by a space.", se.MESSAGE_TYPE_WARNING, filename, [node.to_string() for node in nodes]))
+
+	# Check for no space after periods, but first remove any `<a>` elements as that might match URLs like `standardebooks.org`.
+	dom_clone = deepcopy(dom)
+	for node in dom_clone.xpath("//a[@href]"):
+		# If the link text includes a TLD, clear out the text too.
+		if any(tld in node.inner_text() for tld in (".org", ".com", ".net", ".gov", ".edu", ".us", ".uk", ".nz", ".au", ".ca")):
+			node.remove()
+		else:
+			epub_type = node.get_attr("epub:type")
+			if epub_type and "noteref" in epub_type:
+				# If the link is a noteref, remove it, because some noterefs may start with letters (see <https://standardebooks.org/ebooks/john-reed/ten-days-that-shook-the-world>).
+				node.remove()
+			else:
+				node.remove_attr("href")
+
+	for node in dom_clone.xpath("//abbr"):
+		node.remove()
+
+	for node in dom_clone.xpath("//m:math"):
+		node.remove()
+
+	# Exclude some common non-abbreviations, and don't match if the paragraph contains phonemes or graphemes as it's likely we're spelling something.
+	nodes = dom_clone.xpath("/html/body//p[re:test(.,'[a-z]{1,}\\.[a-z]{1,}', 'i') and not(re:test(., 'A.B.C.|X.Y.Z.') or .//*[re:test(@epub:type, 'grapheme|phoneme')])]")
+	if nodes:
+		messages.append(LintMessage("y-034", "Possible typo: [text].[/] embedded in word. Hint: Abbreviations must be in an [xhtml]<abbr>[/] element.", se.MESSAGE_TYPE_WARNING, filename, [node.to_string() for node in nodes]))
 
 	return messages
 
@@ -3287,6 +3348,7 @@ def lint(self, skip_lint_ignore: bool, allowed_messages: Optional[List[str]] = N
 	files_not_url_safe = []
 	id_values = {}
 	duplicate_id_values = []
+	does_ebook_look_like_collection = False
 	local_css = {
 		"has_poem_style": False,
 		"has_verse_style": False,
@@ -3705,6 +3767,12 @@ def lint(self, skip_lint_ignore: bool, allowed_messages: Optional[List[str]] = N
 				if special_file in SPECIAL_FILES:
 					messages += _lint_special_file_checks(self, filename, dom, file_contents, ebook_flags, special_file)
 
+				if filename.name not in IGNORED_FILENAMES:
+					# Does this book look like a collection? It does if there is a `bodymatter` section that only contains `<article>` children, and none of the titles are roman numerals.
+					nodes = dom.xpath("/html/body[contains(@epub:type, 'bodymatter') and ./article and count(./*[name() != 'article']) = 0 and not(./article/*[re:test(name(), '^h[1-6]$') and contains(@epub:type, 'ordinal')]) and not(./article/hgroup//*[contains(@epub:type, 'ordinal')]) and not(./article/header/hgroup//*[contains(@epub:type, 'ordinal')])]")
+					if nodes:
+						does_ebook_look_like_collection = True
+
 				missing_styles += _update_missing_styles(filename, dom, local_css)
 
 				messages += _lint_xhtml_css_checks(filename, dom, local_css_path)
@@ -3883,6 +3951,12 @@ def lint(self, skip_lint_ignore: bool, allowed_messages: Optional[List[str]] = N
 
 		if entries:
 			messages.append(LintMessage("m-070", "Glossary entry not found in the text.", se.MESSAGE_TYPE_ERROR, self.content_path / "glossary-search-key-map.xml", entries))
+
+	# Does this book look like a collection? It does if there is a `bodymatter` section that only contains `<article>` children.
+	if does_ebook_look_like_collection:
+		nodes = self.metadata_dom.xpath("/package/metadata/meta[@property='se:is-a-collection' and text()='true']")
+		if not nodes:
+			messages.append(LintMessage("m-079", "Ebook looks like a collection, but no [xml]<meta property=\"se:is-a-collection\">true</meta>[/] element in metadata.", se.MESSAGE_TYPE_WARNING, self.metadata_file_path))
 
 	if not allowed_messages:
 		allowed_messages = []

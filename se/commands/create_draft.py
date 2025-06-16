@@ -615,29 +615,29 @@ def _create_draft(args: Namespace, plain_output: bool):
 		content_path = repo_path
 
 	if not args.white_label:
-		# Get data on authors
+		# Get data on authors.
 		for _, author in enumerate(authors):
 			if not args.offline and author["name"].lower() != "anonymous":
 				author["wiki_url"], author["nacoaf_uri"] = _get_wikipedia_url(author["name"], True)
 
-		# Get data on translators
+		# Get data on translators.
 		for _, translator in enumerate(translators):
 			if not args.offline and translator["name"].lower() != "anonymous":
 				translator["wiki_url"], translator["nacoaf_uri"] = _get_wikipedia_url(translator["name"], True)
 
-		# Get data on illustrators
+		# Get data on illustrators.
 		for _, illustrator in enumerate(illustrators):
 			if not args.offline and illustrator["name"].lower() != "anonymous":
 				illustrator["wiki_url"], illustrator["nacoaf_uri"] = _get_wikipedia_url(illustrator["name"], True)
 
-	# Download PG HTML and do some fixups
+	# Download PG HTML and do some fixups.
 	if args.pg_id:
 		if args.offline:
 			raise se.RemoteCommandErrorException("Cannot download Project Gutenberg ebook when offline option is enabled.")
 
 		pg_url = f"https://www.gutenberg.org/ebooks/{args.pg_id}"
 
-		# Get the ebook metadata
+		# Get the ebook metadata.
 		if args.verbose:
 			console.print(se.prep_output(f"Downloading ebook metadata from [path][link={pg_url}]{pg_url}[/][/] ...", plain_output))
 		try:
@@ -649,7 +649,7 @@ def _create_draft(args: Namespace, plain_output: bool):
 		html_parser = etree.HTMLParser()
 		dom = etree.parse(StringIO(pg_metadata_html), html_parser)
 
-		# Get the ebook HTML URL from the metadata
+		# Get the ebook HTML URL from the metadata.
 		pg_ebook_url = None
 		for node in dom.xpath("/html/body//a[contains(@type, 'text/html')]"):
 			pg_ebook_url = regex.sub(r"^//", "https://", node.get("href"))
@@ -658,19 +658,19 @@ def _create_draft(args: Namespace, plain_output: bool):
 		if not pg_ebook_url:
 			raise se.RemoteCommandErrorException("Could download ebook metadata, but couldn’t find URL for the ebook HTML.")
 
-		# Get the ebook LCSH categories
+		# Get the ebook LCSH categories.
 		pg_subjects = []
 		for node in dom.xpath("/html/body//td[contains(@property, 'dcterms:subject')]"):
 			if node.get("datatype") == "dcterms:LCSH":
 				for subject_link in node.xpath("./a"):
 					pg_subjects.append(subject_link.text.strip())
 
-		# Get the PG publication date
+		# Get the PG publication date.
 		pg_publication_year = None
 		for node in dom.xpath("//td[@itemprop='datePublished']"):
 			pg_publication_year = regex.sub(r".+?([0-9]{4})", "\\1", node.text)
 
-		# Get the actual ebook URL
+		# Get the actual ebook URL.
 		if args.verbose:
 			console.print(se.prep_output(f"Downloading ebook transcription from [path][link={pg_ebook_url}]{pg_ebook_url}[/][/] ...", plain_output))
 		try:
@@ -685,12 +685,12 @@ def _create_draft(args: Namespace, plain_output: bool):
 		except Exception as ex:
 			raise se.InvalidEncodingException(f"Couldn’t determine text encoding of Project Gutenberg HTML file. Exception: {ex}") from ex
 
-		# Try to guess the ebook language
+		# Try to guess the ebook language.
 		pg_language = "en-US"
 		if "colour" in pg_ebook_html or "favour" in pg_ebook_html or "honour" in pg_ebook_html:
 			pg_language = "en-GB"
 
-	# Create necessary directories
+	# Create necessary directories.
 	if args.verbose:
 		console.print(se.prep_output(f"Building ebook structure in [path][link=file://{repo_path}]{repo_path}[/][/] ...", plain_output))
 
@@ -704,7 +704,7 @@ def _create_draft(args: Namespace, plain_output: bool):
 
 	is_pg_html_parsed = True
 
-	# Write PG data if we have it
+	# Write PG data if we have it.
 	if args.pg_id and pg_ebook_html:
 		if args.verbose:
 			console.print(se.prep_output("Cleaning transcription ...", plain_output))
@@ -713,61 +713,82 @@ def _create_draft(args: Namespace, plain_output: bool):
 			dom = etree.parse(StringIO(regex.sub(r"encoding=(?P<quote>[\'\"]).+?(?P=quote)", "", pg_ebook_html)), html_parser)
 			namespaces = {"re": "http://exslt.org/regular-expressions"}
 
-			for node in dom.xpath("//*[re:test(text(), '\\*\\*\\*\\s*Produced by.+')]", namespaces=namespaces):
+			for node in dom.xpath("//*[re:test(text(), '\\*\\*\\*\\s*Produced by.+')] | //section[@id='pg-header']//p[re:test(., 'Credits: ')]", namespaces=namespaces):
 				node_html = etree.tostring(node, encoding=str, method="html", with_tail=False)
 
 				# Sometimes, lxml returns the entire HTML instead of the node HTML for a node.
-				# It's unclear why this happens. An example is https://www.gutenberg.org/ebooks/21721
-				# If the HTML is larger than some large size, abort trying to find producers
+				# It's unclear why this happens. An example is <https://www.gutenberg.org/ebooks/21721>.
+				# If the HTML is larger than some large size, abort trying to find producers.
 				if len(node_html) > 3000:
 					continue
 
-				producers_text = regex.sub(r"^<[^>]+?>", "", node_html)
+				# Strip tags.
+				producers_text = node_html
+				producers_text = regex.sub(r"<.+?>", " ", producers_text, flags=regex.DOTALL)
+
+				producers_text = regex.sub(r"^<[^>]+?>", "", producers_text)
 				producers_text = regex.sub(r"<[^>]+?>$", "", producers_text)
 
-				producers_text = regex.sub(r".+?Produced by (.+?)\s*$", "\\1", producers_text, flags=regex.DOTALL)
+				producers_text = regex.sub(r".+?(Produced by|Credits\s*:\s*) (.+?)\s*$", "\\2", producers_text, flags=regex.DOTALL)
+				# workaround for what appears to be a PG bug where the credits start as "Credits: Produced by Name1"
+				producers_text = regex.sub(r"Produced by ", "", producers_text)
 				producers_text = regex.sub(r"\(.+?\)", "", producers_text, flags=regex.DOTALL)
+				producers_text = regex.sub(r" \s+", " ", producers_text, flags=regex.DOTALL)
 				producers_text = regex.sub(r"(at )?https?://www\.pgdp\.net", "", producers_text)
 				producers_text = regex.sub(r"[\r\n]+", " ", producers_text)
 				producers_text = regex.sub(r",? and ", ", and ", producers_text)
-				producers_text = producers_text.replace(" and the Online", " and The Online")
 				producers_text = producers_text.replace(", and ", ", ").strip()
 
 				pg_producers = [producer.strip() for producer in regex.split(',|;', producers_text)]
 
-			# Try to strip out the PG header
-			for node in dom.xpath("//*[re:test(text(), '\\*\\*\\*\\s*START OF THIS')]", namespaces=namespaces):
-				for sibling_node in node.xpath("./preceding-sibling::*"):
-					easy_node = se.easy_xml.EasyXmlElement(sibling_node)
-					easy_node.remove()
+				for key, producer in enumerate(pg_producers):
+					if "Distributed Proofread" in producer:
+						pg_producers[key] = "Distributed Proofreaders"
 
+			# Strip everything in `<head>`.
+			for node in dom.xpath("/html/head//*"):
 				easy_node = se.easy_xml.EasyXmlElement(node)
 				easy_node.remove()
 
-			# Try to strip out the PG license footer
-			for node in dom.xpath("//*[re:test(text(), 'End of (the )?Project Gutenberg')]", namespaces=namespaces):
-				for sibling_node in node.xpath("./following-sibling::*"):
-					easy_node = se.easy_xml.EasyXmlElement(sibling_node)
+			# Try to strip out the PG header and footer for new PG ebooks.
+			nodes = dom.xpath("//section[contains(@class, 'pg-boilerplate')]")
+			if nodes:
+				for node in nodes:
+					easy_node = se.easy_xml.EasyXmlElement(node)
+					easy_node.remove()
+			else:
+				# Old PG ebooks might have a different structure.
+				for node in dom.xpath("//*[re:test(text(), '\\*\\*\\*\\s*START OF (THE|THIS)')]", namespaces=namespaces):
+					for sibling_node in node.xpath("./preceding-sibling::*"):
+						easy_node = se.easy_xml.EasyXmlElement(sibling_node)
+						easy_node.remove()
+
+					easy_node = se.easy_xml.EasyXmlElement(node)
 					easy_node.remove()
 
-				easy_node = se.easy_xml.EasyXmlElement(node)
-				easy_node.remove()
+				# Try to strip out the PG license footer.
+				for node in dom.xpath("//*[re:test(text(), 'End of (the )?Project Gutenberg')]", namespaces=namespaces):
+					for sibling_node in node.xpath("./following-sibling::*"):
+						easy_node = se.easy_xml.EasyXmlElement(sibling_node)
+						easy_node.remove()
 
-			# lxml will put the xml declaration in a weird place, remove it first
+					easy_node = se.easy_xml.EasyXmlElement(node)
+					easy_node.remove()
+
+			# lxml will put the XML declaration in a weird place, remove it first.
 			output = regex.sub(r"<\?xml.+?\?>", "", etree.tostring(dom, encoding="unicode"))
 
-			# Now re-add it
+			# Now re-add it.
 			output = """<?xml version="1.0" encoding="utf-8"?>\n""" + output
 
-			# lxml can also output duplicate default namespace declarations so remove the first one only
+			# lxml can also output duplicate default namespace declarations so remove the first one only.
 			output = regex.sub(r"(xmlns=\".+?\")(\sxmlns=\".+?\")+", r"\1", output)
 
-			# lxml may also create duplicate xml:lang attributes on the root element. Not sure why. Remove them.
+			# lxml may also create duplicate `xml:lang` attributes on the root element. Not sure why. Remove them.
 			output = regex.sub(r'(xml:lang="[^"]+?" lang="[^"]+?") xml:lang="[^"]+?"', r"\1", output)
 
 		except Exception:
-			# Save this error for later; we still want to save the book text and complete the
-			#  create-draft process even if we've failed to parse PG's HTML source.
+			# Save this error for later; we still want to save the book text and complete the `create-draft` process even if we've failed to parse PG's HTML source.
 			is_pg_html_parsed = False
 			output = pg_ebook_html
 
@@ -888,24 +909,29 @@ def _create_draft(args: Namespace, plain_output: bool):
 					colophon_xhtml = colophon_xhtml.replace("PG_YEAR", pg_publication_year)
 
 				if pg_producers:
+					producer_count = len(pg_producers)
 					producers_xhtml = ""
 					for i, producer in enumerate(pg_producers):
 						if "Distributed Proofread" in producer:
-							producers_xhtml = producers_xhtml + """<a href="https://www.pgdp.net">The Online Distributed Proofreading Team</a>"""
+							producers_xhtml = producers_xhtml + """<a href="https://www.pgdp.net">Distributed Proofreaders</a>"""
 						elif "anonymous" in producer.lower():
 							producers_xhtml = producers_xhtml + """<b epub:type="z3998:personal-name">An Anonymous Volunteer</b>"""
 						else:
 							producers_xhtml = producers_xhtml + f"""<b epub:type="z3998:personal-name">{_add_name_abbr(escape(producer)).strip('.')}</b>"""
 
-						if i < len(pg_producers) - 1:
-							producers_xhtml = producers_xhtml + ", "
+						if i < producer_count - 1:
+							# If exactly two producers, we don't want a comma between them
+							if producer_count == 2:
+								producers_xhtml = producers_xhtml + " "
+							else:
+								producers_xhtml = producers_xhtml + ", "
 
-						if i == len(pg_producers) - 2:
+						if i == producer_count - 2:
 							producers_xhtml = producers_xhtml + "and "
 
 					producers_xhtml = producers_xhtml + "<br/>"
 
-					colophon_xhtml = colophon_xhtml.replace("""<b epub:type="z3998:personal-name">TRANSCRIBER_1</b>, <b epub:type="z3998:personal-name">TRANSCRIBER_2</b>, and <a href=\"https://www.pgdp.net\">The Online Distributed Proofreading Team</a><br/>""", producers_xhtml)
+					colophon_xhtml = colophon_xhtml.replace("""<b epub:type="z3998:personal-name">TRANSCRIBER_1</b>, <b epub:type="z3998:personal-name">TRANSCRIBER_2</b>, and <a href=\"https://www.pgdp.net\">Distributed Proofreaders</a><br/>""", producers_xhtml)
 
 			file.seek(0)
 			file.write(colophon_xhtml)
@@ -926,7 +952,7 @@ def _create_draft(args: Namespace, plain_output: bool):
 			for producer in pg_producers:
 				# Name and File-As
 				if "Distributed Proofread" in producer:
-					producers_xhtml = producers_xhtml + f"\t\t<dc:contributor id=\"transcriber-{i}\">The Online Distributed Proofreading Team</dc:contributor>\n\t\t<meta property=\"file-as\" refines=\"#transcriber-{i}\">Online Distributed Proofreading Team, The</meta>\n"
+					producers_xhtml = producers_xhtml + f"\t\t<dc:contributor id=\"transcriber-{i}\">Distributed Proofreaders</dc:contributor>\n\t\t<meta property=\"file-as\" refines=\"#transcriber-{i}\">Distributed Proofreaders</meta>\n"
 				elif "anonymous" in producer.lower():
 					producers_xhtml = producers_xhtml + f"\t\t<dc:contributor id=\"transcriber-{i}\">An Anonymous Volunteer</dc:contributor>\n\t\t<meta property=\"file-as\" refines=\"#transcriber-{i}\">Anonymous Volunteer, An</meta>\n"
 				else:
@@ -945,7 +971,12 @@ def _create_draft(args: Namespace, plain_output: bool):
 
 				i = i + 1
 
-			metadata_xml = regex.sub(r"\t\t<dc:contributor id=\"transcriber-1\">TRANSCRIBER</dc:contributor>\s*<meta property=\"file-as\" refines=\"#transcriber-1\">TRANSCRIBER_SORT</meta>\s*<meta property=\"se:url\.homepage\" refines=\"#transcriber-1\">TRANSCRIBER_URL</meta>\s*<meta property=\"role\" refines=\"#transcriber-1\" scheme=\"marc:relators\">trc</meta>", "\t\t" + producers_xhtml.strip(), metadata_xml)
+			# replace the first transcriber line with a placeholder
+			metadata_xml = regex.sub(r"\t\t<dc:contributor id=\"transcriber-1\">TRANSCRIBER_1</dc:contributor>", "\t\tCREDITS_PLACEHOLDER", metadata_xml)
+			# remove the remaining transcriber lines
+			metadata_xml = regex.sub(r"^.+?transcriber.+?\n", "", metadata_xml, flags=regex.MULTILINE)
+			# replace the placeholder with the actual transcribers
+			metadata_xml = regex.sub(r"\t\tCREDITS_PLACEHOLDER", "\t\t" + producers_xhtml.strip(), metadata_xml, flags=regex.DOTALL)
 
 		if ebook_wiki_url:
 			metadata_xml = metadata_xml.replace(">EBOOK_WIKI_URL<", f">{ebook_wiki_url}<")

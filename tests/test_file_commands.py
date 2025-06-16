@@ -1,19 +1,21 @@
 """
-Tests for commands that take zero or more files as input and produce one or more ouptut files.
-This includes:
-	create-draft, extract-ebook, split-file, unicode-names
+Tests for commands that take zero or one file as input and produce one or more output files.
+The file commands are:
+	create-draft, extract-ebook, split-file
+
+NOTE: Changes to this list should be reflected in the file_commands variable in the files_are_golden
+helper function.
 """
 
 import os
 from pathlib import Path
-import shutil
 import pytest
 from helpers import must_run, files_are_golden
 
 module_directory = Path(__file__).parent / "file_commands"
 module_tests = []
 
-# the directory can't exist until at least one test exists
+# the module directory should not be created until at least one test exists
 if module_directory.is_dir():
 	# the commands being tested are the list of subdirectories
 	test_commands = [os.path.basename(s.path) for s in os.scandir(module_directory) if s.is_dir()]
@@ -25,37 +27,45 @@ if module_directory.is_dir():
 				module_tests.append([test_command, os.path.basename(directory_entry)])
 	module_tests.sort()
 
-# pass the plain command and subdir name so the test ids are easy to read, e.g. typogrify-test-1
+# pass the plain command and test name so the test ids are easy to read, e.g. create-draft-test-1
 @pytest.mark.parametrize("command, test", module_tests)
 
-def test_filecommands(work__directory: Path, command: str, test: Path, update_golden: bool):
+def test_file_commands(work__directory: Path, command: str, test: Path, update_golden: bool):
 	"""
 	Run each command on the input content and validate that the output of the command
 	matches the expected output content.
 	"""
+
 	# the default command to call is the name of the command directory
 	command_to_use = command
 	test_directory = module_directory / command / test
-	# if a file exists in test_directory with the same name as the {command}-command, e.g. help-command,
-	# the first line should contain the full command to use, with any arguments.
+	# if a file exists in test_directory with the name of {command}-command, e.g. create-draft-command,
+	# the first line should contain the command to use, with any arguments, e.g.`command --arg1`
 	command_file = test_directory / (command + "-command")
 	if command_file.is_file():
 		with open(command_file, "r", encoding="utf-8") as cfile:
-			command_full = cfile.readline().rstrip()
+			command_full = cfile.readline().strip()
 		# make sure command is present
 		if command in command_full:
 			command_to_use = command_full
 		else:
 			assert "" == f"'{command_full}' does not contain the command '{command}'"
 
-	# make a directory for the test in the working directory
+	# contains the files specific to the particular test being run
 	in_directory = test_directory / "in"
+	# contains the "golden" files, i.e. the files as they should look after the test
 	golden_directory = test_directory / "golden"
 
-	# copy the input files (if any) to a working test directory
-	work_test_directory = work__directory / command / test
-	shutil.copytree(in_directory, work_test_directory)
+	# The file commands either take no input (create-draft) or a single file (extract-ebook,
+	# split-file), rather than a directory. Get the name of the file to pass to the must_run
+	# command rather than a directory as in the other test groups.
+	if command != "create-draft":
+		in_glob = in_directory.glob("*")
+		for infile in in_glob:
+			if infile.is_file():
+				command_to_use += f" {infile}"
+				break
 
-	# run the command on that directory and verify the output
-	must_run(f"se {command_to_use} {work_test_directory}")
-	files_are_golden(work_test_directory, work_test_directory, golden_directory, update_golden)
+	# run the command on that file and verify the output
+	must_run(f"se {command_to_use}")
+	files_are_golden(command, in_directory, work__directory, golden_directory, update_golden)

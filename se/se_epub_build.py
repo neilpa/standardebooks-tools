@@ -30,6 +30,7 @@ import se.epub
 import se.formatting
 import se.images
 import se.typography
+from se.se_epub import SeEpub # pylint: disable=cyclic-import
 from se.vendor.kobo_touch_extended import kobo
 from se.vendor.mobi import mobi
 
@@ -198,12 +199,10 @@ def build(self, run_epubcheck: bool, check_only: bool, build_kobo: bool, build_k
 				dom = self.get_dom(file_path)
 
 				if dom.xpath("/html/body//section[contains(@epub:type, 'colophon')]"):
-					last_updated_iso = regex.sub(r"\.[0-9]+$", "", self.last_commit.timestamp.isoformat()) + "Z"
-					last_updated_iso = regex.sub(r"\+.+?Z$", "Z", last_updated_iso)
-					# In the line below, we can't use %l (unpadded 12 hour clock hour) because it isn't portable to Windows.
-					# Instead we use %I (padded 12 hour clock hour) and then do a string replace to remove leading zeros.
-					last_updated_friendly = f"{self.last_commit.timestamp:%B %e, %Y, %I:%M <abbr class=\"eoc\">%p</abbr>}".replace(" 0", " ")
-					last_updated_friendly = regex.sub(r"\s+", " ", last_updated_friendly).replace("AM", "a.m.").replace("PM", "p.m.").replace(" <abbr", " <abbr")
+					last_updated = self.last_commit.timestamp
+
+					last_updated_iso = se.formatting.generate_iso_timestamp(last_updated)
+					last_updated_friendly = se.formatting.generate_colophon_timestamp(last_updated)
 
 					# Set modified date in the metadata file
 					for node in metadata_dom.xpath("//meta[@property='dcterms:modified']"):
@@ -443,7 +442,7 @@ def build(self, run_epubcheck: bool, check_only: bool, build_kobo: bool, build_k
 						with importlib.resources.as_file(importlib.resources.files("se.data").joinpath("mathmlcontent2presentation.xsl")) as mathml_xsl_filename:
 							mathml_transform = etree.XSLT(etree.parse(str(mathml_xsl_filename)))
 
-					# Transform the mathml and get a string representation
+					# Transform the MathML and get a string representation
 					# XSLT comes from https://github.com/fred-wang/webextension-content-mathml-polyfill
 					mathml_presentation_tree = mathml_transform(mathml_content_tree)
 					mathml_presentation_xhtml = etree.tostring(mathml_presentation_tree, encoding="unicode", pretty_print=True, with_tail=False).strip()
@@ -452,7 +451,7 @@ def build(self, run_epubcheck: bool, check_only: bool, build_kobo: bool, build_k
 					mathml_presentation_xhtml = regex.sub(r" xmlns=", " xmlns:m=", mathml_presentation_xhtml)
 					mathml_presentation_xhtml = regex.sub(r"<(/)?", r"<\1m:", mathml_presentation_xhtml)
 
-					# Plop our presentational mathml back in to the XHTML we're processing
+					# Plop our presentational MathML back in to the XHTML we're processing
 					node.replace_with(etree.fromstring(str.encode(mathml_presentation_xhtml)))
 
 				# Since we added an outlining stroke to the titlepage/publisher logo images, we
@@ -687,15 +686,19 @@ def build(self, run_epubcheck: bool, check_only: bool, build_kobo: bool, build_k
 		if build_kobo:
 			work_kepub_dir = Path(work_dir / (work_compatible_epub_dir.name + ".kepub"))
 			shutil.copytree(work_compatible_epub_dir, str(work_kepub_dir), dirs_exist_ok=True)
+			work_kepub = SeEpub(work_kepub_dir)
 
 			with open(work_kepub_dir / "epub" / "css" / "se.css", "a", encoding="utf-8") as css_file:
 				with importlib.resources.files("se.data.templates").joinpath("se-kobo.css").open("r", encoding="utf-8") as compatibility_css_file:
 					css_file.write("\n\n" + compatibility_css_file.read())
 
+			# Kobos don't support `break-*` CSS, so attempt to single-file collections into multiple files to create a page break effect.
+			work_kepub.split_collection_files()
+
 			for file_path in work_kepub_dir.glob("**/*"):
 				# Add a note to the metadata file indicating this is a transform build
 				if file_path.name == self.metadata_file_path.name:
-					dom = self.get_dom(file_path)
+					dom = work_kepub.get_dom(file_path)
 
 					for node in dom.xpath("/package[contains(@prefix, 'se:')]/metadata"):
 						node.append(etree.fromstring("""<meta property="se:transform">kobo</meta>"""))
@@ -712,7 +715,7 @@ def build(self, run_epubcheck: bool, check_only: bool, build_kobo: bool, build_k
 					# Note: Kobo supports CSS hyphenation, but it can be improved with soft hyphens.
 					# However we can't insert them, because soft hyphens break the dictionary search when
 					# a word is highlighted.
-					dom = self.get_dom(file_path)
+					dom = work_kepub.get_dom(file_path)
 
 					# Don't add spans to the ToC
 					if dom.xpath("/html/body//nav[contains(@epub:type, 'toc')]"):
@@ -866,7 +869,7 @@ def build(self, run_epubcheck: bool, check_only: bool, build_kobo: bool, build_k
 			# We import this late because we don't want to load selenium if we're not going to use it!
 			from se import browser # pylint: disable=import-outside-toplevel
 
-			# Remove MathML / describedMath accessibilityFeatures as we’re not going to use MathML
+			# Remove MathML / `describedMath` accessibilityFeatures as we’re not going to use MathML
 			for node in metadata_dom.xpath("/package/metadata/meta[@property='schema:accessibilityFeature' and (text() = 'describedMath' or text() = 'MathML')]"):
 				node.remove()
 
@@ -874,7 +877,7 @@ def build(self, run_epubcheck: bool, check_only: bool, build_kobo: bool, build_k
 				node.remove()
 
 			# We wrap this whole thing in a try block, because we need to call
-			# driver.quit() if execution is interrupted (like by ctrl + c, or by an unhandled exception). If we don't call driver.quit(),
+			# `driver.quit()` if execution is interrupted (like by ctrl + c, or by an unhandled exception). If we don't call `driver.quit()`,
 			# Firefox will stay around as a zombie process even if the Python script is dead.
 			try:
 				driver = browser.initialize_selenium_firefox_webdriver()
@@ -885,8 +888,8 @@ def build(self, run_epubcheck: bool, check_only: bool, build_kobo: bool, build_k
 
 					dom = self.get_dom(filename)
 
-					# Iterate over mathml nodes and try to make some basic replacements to achieve the same appearance
-					# but without mathml. If we're able to remove all mathml namespaced elements, we don't need to render it as png.
+					# Iterate over MathML nodes and try to make some basic replacements to achieve the same appearance
+					# but without MathML. If we're able to remove all MathML namespaced elements, we don't need to render it as png.
 					for node in dom.xpath("/html/body//m:math"):
 						node_clone = deepcopy(node)
 
@@ -937,7 +940,7 @@ def build(self, run_epubcheck: bool, check_only: bool, build_kobo: bool, build_k
 						for child in node_clone.xpath(".//m:mrow"):
 							child.unwrap()
 
-						# If there are no more mathml-namespaced elements, we succeeded; replace the mathml node
+						# If there are no more mathml-namespaced elements, we succeeded; replace the MathML node
 						# with our modified clone
 						if not node_clone.xpath(".//*[namespace-uri()='http://www.w3.org/1998/Math/MathML']"):
 							# Success!
@@ -1448,7 +1451,7 @@ def build(self, run_epubcheck: bool, check_only: bool, build_kobo: bool, build_k
 				calibre_result = subprocess.run(calibre_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
 				calibre_result.check_returncode()
 			except subprocess.CalledProcessError as ex:
-				output = calibre_result.stdout.decode().strip()
+				output = calibre_result.stdout.decode().strip() # pyright: ignore # `calibre_result` is always bound because this exception is thrown from `calibre_result.check_returncode()`.
 
 				raise se.BuildFailedException(f"[bash]ebook-convert[/] failed with:\n{output}") from ex
 

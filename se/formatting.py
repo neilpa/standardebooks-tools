@@ -5,6 +5,7 @@ several text-level statistics like reading ease, and for adding semantics.
 """
 
 from copy import deepcopy
+from datetime import datetime
 import html.entities
 import math
 import string
@@ -76,15 +77,16 @@ def semanticate(xhtml: str) -> str:
 		"Pvt",
 		"Rev",
 	])
+	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))(M\.?P\.?|H\.?M\.?S\.?|S\.?S\.?|K\.?C\.?|N\.?B\.?|W\.?C\.?|I\.?O\.?U\.?)(?!\b)", lambda result: """<abbr epub:type="z3998:initialism">""" + regex.sub(r"([A-Z])", r"\1.", result.group(1).replace(".", "")) + "</abbr>", xhtml)
+	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))(R\.?A\.?|M\.?A\.?|M\.?D\.?)(?!\b)", lambda result: """<abbr epub:type="z3998:initialism z3998:name-title">""" + regex.sub(r"([A-Z])", r"\1.", result.group(1).replace(".", "")) + "</abbr>", xhtml)
+	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))U\.?S\.?A\.?(?!\b)", r"""<abbr epub:type="z3998:initialism z3998:place">U.S.A.</abbr>""", xhtml)
+	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))([NESW]\.?[NESW]\.?)(?!\b)", lambda result: """<abbr epub:type="se:compass">""" + regex.sub(r"([A-Z])", r"\1.", result.group(1).replace(".", "")) + "</abbr>", xhtml)
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))Bros\.", r"<abbr>Bros.</abbr>", xhtml)
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))Mt\.", r"<abbr>Mt.</abbr>", xhtml)
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))([Vv])ol(s?)\.", r"<abbr>\1ol\2.</abbr>", xhtml)
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))([Cc])hap\. ([0-9])", r"<abbr>\1hap.</abbr> \2", xhtml) # The number allows us to avoid phrases like `Hello, old chap.`
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>)|\.)(P\.(?:P\.)?S\.(?:S\.)?\B)", r"""<abbr epub:type="z3998:initialism">\1</abbr>""", xhtml)
-	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))Co\.", r"<abbr>Co.</abbr>", xhtml)
-	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))Inc\.", r"<abbr>Inc.</abbr>", xhtml)
-	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))Ltd\.", r"<abbr>Ltd.</abbr>", xhtml)
-	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))St\.", r"<abbr>St.</abbr>", xhtml)
+	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))(Co\.|Inc\.|Ltd\.|St\.)", r"<abbr>\1</abbr>", xhtml)
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))([Gg])ov\.", r"<abbr>\1ov.</abbr>", xhtml)
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))MS(S?)\.", r"""<abbr>MS\1.</abbr>""", xhtml)
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))([Vv])iz\.", r"<abbr>\1iz.</abbr>", xhtml)
@@ -99,9 +101,7 @@ def semanticate(xhtml: str) -> str:
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))([Ll])ib\.", r"<abbr>\1ib.</abbr>", xhtml) # Lib. = Liber = Book
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))([Ii])\.e\.", r"""<abbr epub:type="z3998:initialism">\1.e.</abbr>""", xhtml)
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))([Ee])\.g\.", r"""<abbr epub:type="z3998:initialism">\1.g.</abbr>""", xhtml)
-	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))\bN\.?B\.\B", r"""<abbr epub:type="z3998:initialism">N.B.</abbr>""", xhtml)
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))Ph\.?\s*D\.?", r"""<abbr epub:type="z3998:name-title">Ph. D.</abbr>""", xhtml)
-	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))(?:IOU(?:\.|\b)|I\.O\.U\.)", r"""<abbr epub:type="z3998:initialism">I.O.U.</abbr>""", xhtml)
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))\b([1-4]D)\b", r"""<abbr epub:type="z3998:initialism">\1</abbr>""", xhtml)
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))(Thos\.|Jas\.|Chas\.|Wm\.)", r"""<abbr epub:type="z3998:given-name">\1</abbr>""", xhtml)
 	xhtml = regex.sub(r"(?<!(?:\.|\B|\<abbr[^>]*?\>))([ap])\.\s?m\.", r"<abbr>\1.m.</abbr>", xhtml)
@@ -128,13 +128,6 @@ def semanticate(xhtml: str) -> str:
 	xhtml = regex.sub(r"<abbr>etc\.</abbr>([”’]?(?:</p>|\s+[“‘]?[\p{Uppercase_Letter}]))", r"""<abbr class="eoc">etc.</abbr>\1""", xhtml)
 	xhtml = regex.sub(r"""<abbr( epub:type="[^"]+")?>([^<]+\.)</abbr>([”’]?</p>)""", r"""<abbr class="eoc"\1>\2</abbr>\3""", xhtml)
 
-	# We may have added eoc classes twice, so remove duplicates here
-	xhtml = regex.sub(r"""<abbr class="(.*) eoc(\s+eoc)+">""", r"""<abbr class="\1 eoc">""", xhtml)
-
-	# Clean up nesting errors
-	xhtml = regex.sub(r"""<abbr class="eoc"><abbr>([^<]+)</abbr></abbr>""", r"""<abbr class="eoc">\1</abbr>""", xhtml)
-	xhtml = regex.sub(r"""class="eoc eoc""", r"""class="eoc""", xhtml)
-
 	# Get Roman numerals >= 2 characters
 	# We only wrap these if they're standalone (i.e. not already wrapped in a tag) to prevent recursion in multiple runs
 	# Ignore "numerals" followed by a dash, as they are more likely something like `x-ray` or `v-shaped`
@@ -157,7 +150,7 @@ def semanticate(xhtml: str) -> str:
 	xhtml = regex.sub(r"(?<![\$£0-9,])([0-9½¼⅙⅚⅛⅜⅝⅞]+)\s*(ft|yd|mi|pt|qt|gal|oz|lbs)\.?\b", fr"\1{se.NO_BREAK_SPACE}<abbr>\2.</abbr>", xhtml)
 
 	# Handle `in.` separately to require a period, because with an optional period there are too many false positives
-	xhtml = regex.sub(r"(?<![\$£0-9,])([0-9½¼⅙⅚⅛⅜⅝⅞]+)\s*in\.(\b|\s)", fr"\1{se.NO_BREAK_SPACE}<abbr>in.</abbr>", xhtml)
+	xhtml = regex.sub(r"(?<![\$£0-9,])([0-9½¼⅙⅚⅛⅜⅝⅞]+)\s*in\.(\b|[\s,:;!?])", fr"\1{se.NO_BREAK_SPACE}<abbr>in.</abbr>\2", xhtml)
 
 	# Fix some possible errors introduced by the above
 	xhtml = regex.sub(fr"((?:[Nn]o\.|[Nn]umber)\s[0-9]+){se.NO_BREAK_SPACE}<abbr>in\.</abbr>", r"\1 in", xhtml)
@@ -166,12 +159,32 @@ def semanticate(xhtml: str) -> str:
 	xhtml = regex.sub(r"([0-9]+)\s*m\.?p\.?h\.?", fr"\1{se.NO_BREAK_SPACE}<abbr>mph</abbr>", xhtml, flags=regex.IGNORECASE)
 	xhtml = regex.sub(r"([0-9]+)\s*h\.?p\.?", fr"\1{se.NO_BREAK_SPACE}<abbr>hp</abbr>", xhtml, flags=regex.IGNORECASE)
 
-	# We may have added HTML tags within title tags. Remove those here
-	matches = regex.findall(r"<title>.+?</title>", xhtml)
-	if matches:
-		xhtml = regex.sub(r"<title>.+?</title>", f"<title>{se.formatting.remove_tags(matches[0])}</title>", xhtml)
+	# In the above regexes, we may have introduced HTML into attribute values, for example:
+	# `<a id="CHAPTER_<span epub:type="z3998:roman">II</span>"/>`
+	# Try to remove those here.
+	compiled_regex = regex.compile(r'=\s*"([^"]*)</?[a-z]+[^>]*?>([^"]*)"')
+	while regex.search(compiled_regex, xhtml) is not None:
+		xhtml = regex.sub(compiled_regex, r'="\1\2"', xhtml)
 
-	return xhtml
+	dom = se.easy_xml.EasyXmlTree(xhtml)
+
+	# We may have added HTML tags within title tags. Remove those here.
+	for node in dom.xpath("/html/head/title"):
+		replacement_node = se.easy_xml.EasyXmlElement(f"<title>{node.inner_text()}</title>")
+		node.replace_with(replacement_node)
+
+	# We may have added `eoc` classes twice, so remove duplicates here
+	for node in dom.xpath("/html/body//*[re:test(@class, '\\beoc\\seoc\\b')]"):
+		node.set_attr("class", regex.sub(r"\beoc\seoc\b", "eoc", node.get_attr("class")))
+
+	# Clean up nesting errors
+	for node in dom.xpath("/html/body//abbr/abbr"):
+		node.unwrap()
+
+	for node in dom.xpath("/html/body//blockquote//*[name() = 'header' or name() = 'footer']"):
+		node.set_attr("role", "presentation")
+
+	return dom.to_string()
 
 def get_flesch_reading_ease(xhtml: str) -> float:
 	"""
@@ -1498,6 +1511,30 @@ def generate_title(xhtml: Union[str, EasyXmlTree]) -> str:
 
 	return title
 
+def generate_iso_timestamp(timestamp: datetime) -> str:
+	"""
+	Given a `datetime` in UTC, generate a string in the format `YYY-mm-ddTHH:ii:ssZ`.
+	"""
+
+	# Remove time zone.
+	formatted_timestamp = regex.sub(r"\+.+", "", timestamp.isoformat())
+	# Remove microseconds.
+	formatted_timestamp = regex.sub(r"\.[0-9]+", "", formatted_timestamp) + "Z"
+
+	return formatted_timestamp
+
+def generate_colophon_timestamp(timestamp: datetime) -> str:
+	"""
+	Given a `datetime` in UTC, generate a "friendly" timestamp in HTML format for use in an S.E. colophon.
+	"""
+
+	# In the line below, we can't use %l (unpadded 12 hour clock hour) because it isn't portable to Windows.
+	# Instead we use %I (padded 12 hour clock hour) and then do a string replace to remove leading zeros.
+	formatted_timestamp = f"{timestamp:%B %e, %Y, %I:%M{se.NO_BREAK_SPACE}<abbr class=\"eoc\">%p</abbr>}".replace(" 0", " ")
+	formatted_timestamp = regex.sub(r"\s+", " ", formatted_timestamp).replace("AM", "a.m.").replace("PM", "p.m.").replace(" <abbr", f"{se.NO_BREAK_SPACE}<abbr")
+
+	return formatted_timestamp
+
 def _get_flattened_children(node: EasyXmlElement, allow_header: bool) -> List[EasyXmlElement]:
 	"""
 	Helper function for find_unexpected_ids().
@@ -1539,13 +1576,14 @@ def _get_flattened_children(node: EasyXmlElement, allow_header: bool) -> List[Ea
 
 	return result
 
-def find_unexpected_ids(dom: EasyXmlTree) -> List[Tuple[EasyXmlElement, str]]:
+def find_unexpected_ids(dom: EasyXmlTree, no_endnotes: bool = False) -> List[Tuple[EasyXmlElement, str]]:
 	"""
 	Given a DOM tree, return a list of tuples containing nodes and their expected ID attributes.
 	Only nodes with unexpected IDs are returned.
 
 	INPUTS
 	dom: An EasyXmlTree
+	no_endnotes: A boolean indicating whether endnotes are examined; by default they are
 
 	OUTPUTS
 	A list of tuples of (node, expected_id)
@@ -1557,6 +1595,11 @@ def find_unexpected_ids(dom: EasyXmlTree) -> List[Tuple[EasyXmlElement, str]]:
 	# Remove noterefs as they have their own ID rules
 	for node in dom_copy.xpath("/html/body//*[contains(@epub:type, 'noteref')]"):
 		node.remove()
+
+	# The build-ids command has an option to exclude endnotes; if true, then remove endnotes as well
+	if no_endnotes:
+		for node in dom_copy.xpath("/html/body//*[contains(@epub:type, 'endnote')]"):
+			node.remove()
 
 	# IDs are set to `{closest_parent_sectioning_element_id}-{tag_name}-{n}`.
 	# Lines of poetry are set to `{closest_poem_sectioning_element_id}-line-{n}`.
